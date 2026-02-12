@@ -75,13 +75,13 @@ function DoubanPageClient() {
     // 使用短暂延迟确保状态更新完成后标记选择器准备好
     const timer = setTimeout(() => {
       setSelectorsReady(true);
-    }, 50);
+    }, 200);
 
     return () => clearTimeout(timer);
   }, [type]);
 
   // 生成骨架屏数据
-  const skeletonData = Array.from({ length: 25 }, (_, index) => index);
+  const skeletonData = Array.from({ length: 200 }, (_, index) => index);
 
   // 生成API请求参数的辅助函数
   const getRequestParams = useCallback(
@@ -92,7 +92,7 @@ function DoubanPageClient() {
           kind: 'tv' as const,
           category: type,
           type: secondarySelection,
-          pageLimit: 25,
+          pageLimit: 200,
           pageStart,
         };
       }
@@ -102,7 +102,7 @@ function DoubanPageClient() {
         kind: type as 'tv' | 'movie',
         category: primarySelection,
         type: secondarySelection,
-        pageLimit: 25,
+        pageLimit: 200,
         pageStart,
       };
     },
@@ -117,7 +117,7 @@ function DoubanPageClient() {
 
       if (data.code === 200) {
         setDoubanData(data.list);
-        setHasMore(data.list.length === 25);
+        setHasMore(data.list.length === 200);
         setLoading(false);
       } else {
         throw new Error(data.message || '获取数据失败');
@@ -172,12 +172,12 @@ function DoubanPageClient() {
           setIsLoadingMore(true);
 
           const data = await getDoubanCategories(
-            getRequestParams(currentPage * 25)
+            getRequestParams(currentPage * 200)
           );
 
           if (data.code === 200) {
             setDoubanData((prev) => [...prev, ...data.list]);
-            setHasMore(data.list.length === 25);
+            setHasMore(data.list.length === 200);
           } else {
             throw new Error(data.message || '获取数据失败');
           }
