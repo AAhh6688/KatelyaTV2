@@ -15,19 +15,19 @@ import PageLayout from '@/components/PageLayout';
 import VideoCard from '@/components/VideoCard';
 
 // 最大加载条数限制
-// 每个子目录（分类组合）独立计算，都是最多411条
+// 每个子目录（分类组合）独立计算，都是最多326条
 // 
 // 子目录组合示例：
 // - 电影：primarySelection（热门/最新/豆瓣高分等） + secondarySelection（全部/华语/欧美/韩国/日本等）
 // - 剧集：primarySelection（空） + secondarySelection（tv/国产/欧美/日本/韩国/动漫/纪录片等）
 // - 综艺：primarySelection（空） + secondarySelection（show的各种分类）
 //
-// 每个组合都是独立的411条限制，例如：
-// - 电影-热门-全部：最多411条
-// - 电影-热门-华语：最多411条
-// - 电影-最新-欧美：最多411条
-// - 剧集-国产：最多411条
-const MAX_ITEMS = 411;
+// 每个组合都是独立的326条限制，例如：
+// - 电影-热门-全部：最多326条
+// - 电影-热门-华语：最多326条
+// - 电影-最新-欧美：最多326条
+// - 剧集-国产：最多326条
+const MAX_ITEMS = 326;
 
 function DoubanPageClient() {
   const searchParams = useSearchParams();
@@ -96,7 +96,7 @@ function DoubanPageClient() {
   }, [type]);
 
   // 生成骨架屏数据
-  const skeletonData = Array.from({ length: 88 }, (_, index) => index);
+  const skeletonData = Array.from({ length: 25 }, (_, index) => index);
 
   // 生成API请求参数的辅助函数
   const getRequestParams = useCallback(
@@ -107,7 +107,7 @@ function DoubanPageClient() {
           kind: 'tv' as const,
           category: type,
           type: secondarySelection,
-          pageLimit: 88,
+          pageLimit: 25,
           pageStart,
         };
       }
@@ -117,7 +117,7 @@ function DoubanPageClient() {
         kind: type as 'tv' | 'movie',
         category: primarySelection,
         type: secondarySelection,
-        pageLimit: 88,
+        pageLimit: 25,
         pageStart,
       };
     },
@@ -134,7 +134,7 @@ function DoubanPageClient() {
       if (data.code === 200) {
         setDoubanData(data.list);
         // 检查当前子目录是否已达到最大条数或没有更多数据
-        setHasMore(data.list.length === 88 && data.list.length < MAX_ITEMS);
+        setHasMore(data.list.length === 25 && data.list.length < MAX_ITEMS);
         setLoading(false);
       } else {
         throw new Error(data.message || '获取数据失败');
@@ -146,7 +146,7 @@ function DoubanPageClient() {
 
   // 只在选择器准备好后才加载数据
   // 注意：每次选择器变化（primarySelection 或 secondarySelection）都会重置数据
-  // 这样每个子目录都是独立的，都有自己的411条限制
+  // 这样每个子目录都是独立的，都有自己的326条限制
   useEffect(() => {
     // 只有在选择器准备好时才开始加载
     if (!selectorsReady) {
@@ -184,7 +184,7 @@ function DoubanPageClient() {
   ]);
 
   // 单独处理 currentPage 变化（加载更多）
-  // 每个子目录（primarySelection + secondarySelection的组合）独立计算，最多411条
+  // 每个子目录（primarySelection + secondarySelection的组合）独立计算，最多326条
   useEffect(() => {
     if (currentPage > 0) {
       const fetchMoreData = async () => {
@@ -192,13 +192,13 @@ function DoubanPageClient() {
           setIsLoadingMore(true);
 
           const data = await getDoubanCategories(
-            getRequestParams(currentPage * 88)
+            getRequestParams(currentPage * 25)
           );
 
           if (data.code === 200) {
             setDoubanData((prev) => {
               const newData = [...prev, ...data.list];
-              // 限制当前子目录最多411条数据
+              // 限制当前子目录最多326条数据
               const limitedData = newData.slice(0, MAX_ITEMS);
               return limitedData;
             });
@@ -206,8 +206,8 @@ function DoubanPageClient() {
             // 检查当前子目录是否还有更多数据可加载
             setHasMore((prev) => {
               const currentTotal = doubanData.length + data.list.length;
-              // 如果已经达到411条或没有返回88条数据，则停止加载
-              return data.list.length === 88 && currentTotal < MAX_ITEMS;
+              // 如果已经达到326条或没有返回25条数据，则停止加载
+              return data.list.length === 25 && currentTotal < MAX_ITEMS;
             });
           } else {
             throw new Error(data.message || '获取数据失败');
@@ -238,7 +238,7 @@ function DoubanPageClient() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
-          // 检查当前子目录的数据量是否已达到最大值（411条）
+          // 检查当前子目录的数据量是否已达到最大值（326条）
           if (doubanData.length < MAX_ITEMS) {
             setCurrentPage((prev) => prev + 1);
           }
@@ -259,7 +259,7 @@ function DoubanPageClient() {
 
   // 处理选择器变化
   // 任何一个选择器变化（地区或类型）都会触发数据重新加载
-  // 每个新的组合都从0开始计数，最多加载411条
+  // 每个新的组合都从0开始计数，最多加载326条
   const handlePrimaryChange = useCallback(
     (value: string) => {
       // 只有当值真正改变时才设置loading状态
