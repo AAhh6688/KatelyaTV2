@@ -244,15 +244,31 @@ function SearchPageClient() {
     // 1. 标题过滤
     if (badTitleKeywords.some(k => titleLower.includes(k.toLowerCase()))) return true;
 
-    // 2. 类型过滤（假设类型字段为 type 或 episodes 判断，兼容原代码）
-    const videoType = (item as any).type || (item.episodes.length === 1 ? 'movie' : 'tv');
-    const typeLower = String(videoType).toLowerCase();
-    if (badTypeKeywords.some(k => typeLower.includes(k.toLowerCase()))) return true;
+    // 2. 类型过滤 - 扩展检查 category 或 type 字段，并兼容 episodes 计算
+    let videoType = '';
+    if ((item as any).category) {
+      videoType = (item as any).category;
+    } else if ((item as any).type) {
+      videoType = (item as any).type;
+    } else if (item.episodes && item.episodes.length) {
+      videoType = item.episodes.length === 1 ? 'movie' : 'tv';
+    }
+    if (videoType) {
+      const typeLower = String(videoType).toLowerCase();
+      if (badTypeKeywords.some(k => typeLower.includes(k.toLowerCase()))) return true;
+    }
 
-    // 3. 标签过滤（假设标签字段为 tags，如果不存在则跳过）
+    // 3. 标签过滤 - 检查 tags 字段，支持数组或字符串
     const tags = (item as any).tags;
     if (tags) {
-      const tagsStr = Array.isArray(tags) ? tags.join(' ').toLowerCase() : String(tags).toLowerCase();
+      let tagsStr = '';
+      if (Array.isArray(tags)) {
+        tagsStr = tags.join(' ').toLowerCase();
+      } else if (typeof tags === 'string') {
+        tagsStr = tags.toLowerCase();
+      } else {
+        tagsStr = String(tags).toLowerCase();
+      }
       if (badTagsKeywords.some(k => tagsStr.includes(k.toLowerCase()))) return true;
     }
 
