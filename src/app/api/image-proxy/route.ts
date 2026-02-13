@@ -1,73 +1,397 @@
-import { NextResponse } from 'next/server';
+/* eslint-disable no-console,react-hooks/exhaustive-deps */
 
-import { addCorsHeaders, handleOptionsRequest } from '@/lib/cors';
+'use client';
 
-export const runtime = 'edge';
+import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-// 处理OPTIONS预检请求（OrionTV客户端需要）
-export async function OPTIONS() {
-  return handleOptionsRequest();
+import { getDoubanCategories } from '@/lib/douban.client';
+import { DoubanItem } from '@/lib/types';
+
+import DoubanCardSkeleton from '@/components/DoubanCardSkeleton';
+import DoubanSelector from '@/components/DoubanSelector';
+import PageLayout from '@/components/PageLayout';
+import VideoCard from '@/components/VideoCard';
+
+// 最大加载条数限制
+// 每个子目录（分类组合）独立计算，都是最多326条
+// 
+// 子目录组合示例：
+// - 电影：primarySelection（热门/最新/豆瓣高分等） + secondarySelection（全部/华语/欧美/韩国/日本等）
+// - 剧集：primarySelection（空） + secondarySelection（tv/国产/欧美/日本/韩国/动漫/纪录片等）
+// - 综艺：primarySelection（空） + secondarySelection（show的各种分类）
+//
+// 每个组合都是独立的326条限制，例如：
+// - 电影-热门-全部：最多326条
+// - 电影-热门-华语：最多326条
+// - 电影-最新-欧美：最多326条
+// - 剧集-国产：最多326条
+const MAX_ITEMS = 326;
+
+function DoubanPageClient() {
+  const searchParams = useSearchParams();
+  const [doubanData, setDoubanData] = useState<DoubanItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [selectorsReady, setSelectorsReady] = useState(false);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const loadingRef = useRef<HTMLDivElement | null>(null);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const type = searchParams.get('type') || 'movie';
+
+  // 选择器状态 - 完全独立，不依赖URL参数
+  const [primarySelection, setPrimarySelection] = useState<string>(() => {
+    return type === 'movie' ? '热门' : '';
+  });
+  const [secondarySelection, setSecondarySelection] = useState<string>(() => {
+    if (type === 'movie') return '全部';
+    if (type === 'tv') return 'tv';
+    if (type === 'show') return 'show';
+    return '全部';
+  });
+
+  // 初始化时标记选择器为准备好状态
+  useEffect(() => {
+    // 短暂延迟确保初始状态设置完成
+    const timer = setTimeout(() => {
+      setSelectorsReady(true);
+    }, 50);
+
+    return () => clearTimeout(timer);
+  }, []); // 只在组件挂载时执行一次
+
+  // type变化时立即重置selectorsReady（最高优先级）
+  useEffect(() => {
+    setSelectorsReady(false);
+    setLoading(true); // 立即显示loading状态
+  }, [type]);
+
+  // 当type变化时重置选择器状态
+  useEffect(() => {
+    // 批量更新选择器状态
+    if (type === 'movie') {
+      setPrimarySelection('热门');
+      setSecondarySelection('全部');
+    } else if (type === 'tv') {
+      setPrimarySelection('');
+      setSecondarySelection('tv');
+    } else if (type === 'show') {
+      setPrimarySelection('');
+      setSecondarySelection('show');
+    } else {
+      setPrimarySelection('');
+      setSecondarySelection('全部');
+    }
+
+    // 使用短暂延迟确保状态更新完成后标记选择器准备好
+    const timer = setTimeout(() => {
+      setSelectorsReady(true);
+    }, 50);
+
+    return () => clearTimeout(timer);
+  }, [type]);
+
+  // 生成骨架屏数据
+  const skeletonData = Array.from({ length: 25 }, (_, index) => index);
+
+  // 生成API请求参数的辅助函数
+  const getRequestParams = useCallback(
+    (pageStart: number) => {
+      // 当type为tv或show时，kind统一为'tv'，category使用type本身
+      if (type === 'tv' || type === 'show') {
+        return {
+          kind: 'tv' as const,
+          category: type,
+          type: secondarySelection,
+          pageLimit: 25,
+          pageStart,
+        };
+      }
+
+      // 电影类型保持原逻辑
+      return {
+        kind: type as 'tv' | 'movie',
+        category: primarySelection,
+        type: secondarySelection,
+        pageLimit: 25,
+        pageStart,
+      };
+    },
+    [type, primarySelection, secondarySelection]
+  );
+
+  // 防抖的数据加载函数
+  // 每个子目录独立加载，互不影响
+  const loadInitialData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await getDoubanCategories(getRequestParams(0));
+
+      if (data.code === 200) {
+        setDoubanData(data.list);
+        // 检查当前子目录是否已达到最大条数或没有更多数据
+        setHasMore(data.list.length === 25 && data.list.length < MAX_ITEMS);
+        setLoading(false);
+      } else {
+        throw new Error(data.message || '获取数据失败');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }, [type, primarySelection, secondarySelection, getRequestParams]);
+
+  // 只在选择器准备好后才加载数据
+  // 注意：每次选择器变化（primarySelection 或 secondarySelection）都会重置数据
+  // 这样每个子目录都是独立的，都有自己的326条限制
+  useEffect(() => {
+    // 只有在选择器准备好时才开始加载
+    if (!selectorsReady) {
+      return;
+    }
+
+    // 重置页面状态 - 每个子目录独立计数
+    setDoubanData([]);
+    setCurrentPage(0);
+    setHasMore(true);
+    setIsLoadingMore(false);
+
+    // 清除之前的防抖定时器
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
+
+    // 使用防抖机制加载数据，避免连续状态更新触发多次请求
+    debounceTimeoutRef.current = setTimeout(() => {
+      loadInitialData();
+    }, 100); // 100ms 防抖延迟
+
+    // 清理函数
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
+  }, [
+    selectorsReady,
+    type,
+    primarySelection,
+    secondarySelection,
+    loadInitialData,
+  ]);
+
+  // 单独处理 currentPage 变化（加载更多）
+  // 每个子目录（primarySelection + secondarySelection的组合）独立计算，最多326条
+  useEffect(() => {
+    if (currentPage > 0) {
+      const fetchMoreData = async () => {
+        try {
+          setIsLoadingMore(true);
+
+          const data = await getDoubanCategories(
+            getRequestParams(currentPage * 25)
+          );
+
+          if (data.code === 200) {
+            setDoubanData((prev) => {
+              const newData = [...prev, ...data.list];
+              // 限制当前子目录最多326条数据
+              const limitedData = newData.slice(0, MAX_ITEMS);
+              return limitedData;
+            });
+            
+            // 检查当前子目录是否还有更多数据可加载
+            setHasMore((prev) => {
+              const currentTotal = doubanData.length + data.list.length;
+              // 如果已经达到326条或没有返回25条数据，则停止加载
+              return data.list.length === 25 && currentTotal < MAX_ITEMS;
+            });
+          } else {
+            throw new Error(data.message || '获取数据失败');
+          }
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setIsLoadingMore(false);
+        }
+      };
+
+      fetchMoreData();
+    }
+  }, [currentPage, type, primarySelection, secondarySelection]);
+
+  // 设置滚动监听
+  useEffect(() => {
+    // 如果没有更多数据或正在加载，则不设置监听
+    if (!hasMore || isLoadingMore || loading) {
+      return;
+    }
+
+    // 确保 loadingRef 存在
+    if (!loadingRef.current) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
+          // 检查当前子目录的数据量是否已达到最大值（326条）
+          if (doubanData.length < MAX_ITEMS) {
+            setCurrentPage((prev) => prev + 1);
+          }
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    observer.observe(loadingRef.current);
+    observerRef.current = observer;
+
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+      }
+    };
+  }, [hasMore, isLoadingMore, loading, doubanData.length]);
+
+  // 处理选择器变化
+  // 任何一个选择器变化（地区或类型）都会触发数据重新加载
+  // 每个新的组合都从0开始计数，最多加载326条
+  const handlePrimaryChange = useCallback(
+    (value: string) => {
+      // 只有当值真正改变时才设置loading状态
+      // 例如：从"热门"切换到"最新"，会重置数据并重新加载
+      if (value !== primarySelection) {
+        setLoading(true);
+        setPrimarySelection(value);
+      }
+    },
+    [primarySelection]
+  );
+
+  const handleSecondaryChange = useCallback(
+    (value: string) => {
+      // 只有当值真正改变时才设置loading状态
+      // 例如：从"全部"切换到"华语"，会重置数据并重新加载
+      if (value !== secondarySelection) {
+        setLoading(true);
+        setSecondarySelection(value);
+      }
+    },
+    [secondarySelection]
+  );
+
+  const getPageTitle = () => {
+    // 根据 type 生成标题
+    return type === 'movie' ? '电影' : type === 'tv' ? '电视剧' : '综艺';
+  };
+
+  const getActivePath = () => {
+    const params = new URLSearchParams();
+    if (type) params.set('type', type);
+
+    const queryString = params.toString();
+    const activePath = `/douban${queryString ? `?${queryString}` : ''}`;
+    return activePath;
+  };
+
+  return (
+    <PageLayout activePath={getActivePath()}>
+      <div className='px-4 sm:px-10 py-4 sm:py-8 overflow-visible'>
+        {/* 页面标题和选择器 */}
+        <div className='mb-6 sm:mb-8 space-y-4 sm:space-y-6'>
+          {/* 页面标题 */}
+          <div>
+            <h1 className='text-2xl sm:text-3xl font-bold text-gray-800 mb-1 sm:mb-2 dark:text-gray-200'>
+              {getPageTitle()}
+            </h1>
+            <p className='text-sm sm:text-base text-gray-600 dark:text-gray-400'>
+              来自豆瓣的精选内容
+            </p>
+          </div>
+
+          {/* 选择器组件 */}
+          <div className='bg-white/60 dark:bg-gray-800/40 rounded-2xl p-4 sm:p-6 border border-gray-200/30 dark:border-gray-700/30 backdrop-blur-sm'>
+            <DoubanSelector
+              type={type as 'movie' | 'tv' | 'show'}
+              primarySelection={primarySelection}
+              secondarySelection={secondarySelection}
+              onPrimaryChange={handlePrimaryChange}
+              onSecondaryChange={handleSecondaryChange}
+            />
+          </div>
+        </div>
+
+        {/* 内容展示区域 */}
+        <div className='max-w-[95%] mx-auto mt-8 overflow-visible'>
+          {/* 内容网格 */}
+          <div className='grid grid-cols-3 gap-x-2 gap-y-12 px-0 sm:px-2 sm:grid-cols-[repeat(auto-fit,minmax(160px,1fr))] sm:gap-x-8 sm:gap-y-20'>
+            {loading || !selectorsReady
+              ? // 显示骨架屏
+                skeletonData.map((index) => <DoubanCardSkeleton key={index} />)
+              : // 显示实际数据
+                doubanData.map((item, index) => (
+                  <div key={`${item.title}-${index}`} className='w-full'>
+                    <VideoCard
+                      from='douban'
+                      title={item.title}
+                      poster={item.poster}
+                      douban_id={item.id}
+                      rate={item.rate}
+                      year={item.year}
+                      type={type === 'movie' ? 'movie' : ''} // 电影类型严格控制，tv 不控
+                    />
+                  </div>
+                ))}
+          </div>
+
+          {/* 加载更多指示器 */}
+          {hasMore && !loading && (
+            <div
+              ref={(el) => {
+                if (el && el.offsetParent !== null) {
+                  (
+                    loadingRef as React.MutableRefObject<HTMLDivElement | null>
+                  ).current = el;
+                }
+              }}
+              className='flex justify-center mt-12 py-8'
+            >
+              {isLoadingMore && (
+                <div className='flex items-center gap-2'>
+                  <div className='animate-spin rounded-full h-6 w-6 border-b-2 border-green-500'></div>
+                  <span className='text-gray-600'>加载中...</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 没有更多数据提示 */}
+          {!hasMore && doubanData.length > 0 && (
+            <div className='text-center text-gray-500 py-8'>
+              {doubanData.length >= MAX_ITEMS 
+                ? `已加载全部内容（共 ${doubanData.length} 条）` 
+                : '已加载全部内容'}
+            </div>
+          )}
+
+          {/* 空状态 */}
+          {!loading && doubanData.length === 0 && (
+            <div className='text-center text-gray-500 py-8'>暂无相关内容</div>
+          )}
+        </div>
+      </div>
+    </PageLayout>
+  );
 }
 
-// OrionTV 兼容接口
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const imageUrl = searchParams.get('url');
-
-  if (!imageUrl) {
-    const response = NextResponse.json({ error: 'Missing image URL' }, { status: 400 });
-    return addCorsHeaders(response);
-  }
-
-  try {
-    const imageResponse = await fetch(imageUrl, {
-      headers: {
-        Referer: 'https://movie.douban.com/',
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      },
-    });
-
-    if (!imageResponse.ok) {
-      const response = NextResponse.json(
-        { error: imageResponse.statusText },
-        { status: imageResponse.status }
-      );
-      return addCorsHeaders(response);
-    }
-
-    const contentType = imageResponse.headers.get('content-type');
-
-    if (!imageResponse.body) {
-      const response = NextResponse.json(
-        { error: 'Image response has no body' },
-        { status: 500 }
-      );
-      return addCorsHeaders(response);
-    }
-
-    // 创建响应头
-    const headers = new Headers();
-    if (contentType) {
-      headers.set('Content-Type', contentType);
-    }
-
-    // 设置缓存头（可选）
-    headers.set('Cache-Control', 'public, max-age=15720000, s-maxage=15720000'); // 缓存半年
-    headers.set('CDN-Cache-Control', 'public, s-maxage=15720000');
-    headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=15720000');
-
-    // 直接返回图片流
-    const response = new Response(imageResponse.body, {
-      status: 200,
-      headers,
-    });
-    return addCorsHeaders(response);
-  } catch (error) {
-    const response = NextResponse.json(
-      { error: 'Error fetching image' },
-      { status: 500 }
-    );
-    return addCorsHeaders(response);
-  }
+export default function DoubanPage() {
+  return (
+    <Suspense>
+      <DoubanPageClient />
+    </Suspense>
+  );
 }
