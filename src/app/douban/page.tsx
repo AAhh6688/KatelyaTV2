@@ -15,6 +15,8 @@ import PageLayout from '@/components/PageLayout';
 import VideoCard from '@/components/VideoCard';
 
 // 最大加载条数限制
+// 每个子目录（分类组合）独立计算，都是最多326条
+// 例如：电影-热门-全部 最多326条，电影-最新-全部 也是最多326条
 const MAX_ITEMS = 326;
 
 function DoubanPageClient() {
@@ -113,6 +115,7 @@ function DoubanPageClient() {
   );
 
   // 防抖的数据加载函数
+  // 每个子目录独立加载，互不影响
   const loadInitialData = useCallback(async () => {
     try {
       setLoading(true);
@@ -120,7 +123,7 @@ function DoubanPageClient() {
 
       if (data.code === 200) {
         setDoubanData(data.list);
-        // 检查是否已达到最大条数或没有更多数据
+        // 检查当前子目录是否已达到最大条数或没有更多数据
         setHasMore(data.list.length === 25 && data.list.length < MAX_ITEMS);
         setLoading(false);
       } else {
@@ -132,13 +135,15 @@ function DoubanPageClient() {
   }, [type, primarySelection, secondarySelection, getRequestParams]);
 
   // 只在选择器准备好后才加载数据
+  // 注意：每次选择器变化（primarySelection 或 secondarySelection）都会重置数据
+  // 这样每个子目录都是独立的，都有自己的326条限制
   useEffect(() => {
     // 只有在选择器准备好时才开始加载
     if (!selectorsReady) {
       return;
     }
 
-    // 重置页面状态
+    // 重置页面状态 - 每个子目录独立计数
     setDoubanData([]);
     setCurrentPage(0);
     setHasMore(true);
@@ -169,6 +174,7 @@ function DoubanPageClient() {
   ]);
 
   // 单独处理 currentPage 变化（加载更多）
+  // 每个子目录（primarySelection + secondarySelection的组合）独立计算，最多326条
   useEffect(() => {
     if (currentPage > 0) {
       const fetchMoreData = async () => {
@@ -182,12 +188,12 @@ function DoubanPageClient() {
           if (data.code === 200) {
             setDoubanData((prev) => {
               const newData = [...prev, ...data.list];
-              // 限制最多326条数据
+              // 限制当前子目录最多326条数据
               const limitedData = newData.slice(0, MAX_ITEMS);
               return limitedData;
             });
             
-            // 检查是否还有更多数据可加载
+            // 检查当前子目录是否还有更多数据可加载
             setHasMore((prev) => {
               const currentTotal = doubanData.length + data.list.length;
               // 如果已经达到326条或没有返回25条数据，则停止加载
@@ -222,7 +228,7 @@ function DoubanPageClient() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
-          // 检查当前数据量是否已达到最大值
+          // 检查当前子目录的数据量是否已达到最大值（326条）
           if (doubanData.length < MAX_ITEMS) {
             setCurrentPage((prev) => prev + 1);
           }
