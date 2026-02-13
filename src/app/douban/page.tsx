@@ -16,7 +16,17 @@ import VideoCard from '@/components/VideoCard';
 
 // 最大加载条数限制
 // 每个子目录（分类组合）独立计算，都是最多326条
-// 例如：电影-热门-全部 最多326条，电影-最新-全部 也是最多326条
+// 
+// 子目录组合示例：
+// - 电影：primarySelection（热门/最新/豆瓣高分等） + secondarySelection（全部/华语/欧美/韩国/日本等）
+// - 剧集：primarySelection（空） + secondarySelection（tv/国产/欧美/日本/韩国/动漫/纪录片等）
+// - 综艺：primarySelection（空） + secondarySelection（show的各种分类）
+//
+// 每个组合都是独立的326条限制，例如：
+// - 电影-热门-全部：最多326条
+// - 电影-热门-华语：最多326条
+// - 电影-最新-欧美：最多326条
+// - 剧集-国产：最多326条
 const MAX_ITEMS = 326;
 
 function DoubanPageClient() {
@@ -248,9 +258,12 @@ function DoubanPageClient() {
   }, [hasMore, isLoadingMore, loading, doubanData.length]);
 
   // 处理选择器变化
+  // 任何一个选择器变化（地区或类型）都会触发数据重新加载
+  // 每个新的组合都从0开始计数，最多加载326条
   const handlePrimaryChange = useCallback(
     (value: string) => {
       // 只有当值真正改变时才设置loading状态
+      // 例如：从"热门"切换到"最新"，会重置数据并重新加载
       if (value !== primarySelection) {
         setLoading(true);
         setPrimarySelection(value);
@@ -262,6 +275,7 @@ function DoubanPageClient() {
   const handleSecondaryChange = useCallback(
     (value: string) => {
       // 只有当值真正改变时才设置loading状态
+      // 例如：从"全部"切换到"华语"，会重置数据并重新加载
       if (value !== secondarySelection) {
         setLoading(true);
         setSecondarySelection(value);
