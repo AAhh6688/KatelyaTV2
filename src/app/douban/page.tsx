@@ -14,6 +14,9 @@ import DoubanSelector from '@/components/DoubanSelector';
 import PageLayout from '@/components/PageLayout';
 import VideoCard from '@/components/VideoCard';
 
+// 最大加载条数限制
+const MAX_ITEMS = 326;
+
 function DoubanPageClient() {
   const searchParams = useSearchParams();
   const [doubanData, setDoubanData] = useState<DoubanItem[]>([]);
@@ -23,7 +26,7 @@ function DoubanPageClient() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [selectorsReady, setSelectorsReady] = useState(false);
   const observerRef = useRef<IntersectionObserver | null>(null);
-  const loadingRef = useRef<HTMLDivElement>(null);
+  const loadingRef = useRef<HTMLDivElement | null>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const type = searchParams.get('type') || 'movie';
@@ -81,7 +84,7 @@ function DoubanPageClient() {
   }, [type]);
 
   // 生成骨架屏数据
-  const skeletonData = Array.from({ length: 198 }, (_, index) => index);
+  const skeletonData = Array.from({ length: 25 }, (_, index) => index);
 
   // 生成API请求参数的辅助函数
   const getRequestParams = useCallback(
@@ -92,7 +95,7 @@ function DoubanPageClient() {
           kind: 'tv' as const,
           category: type,
           type: secondarySelection,
-          pageLimit: 198,
+          pageLimit: 25,
           pageStart,
         };
       }
@@ -102,7 +105,7 @@ function DoubanPageClient() {
         kind: type as 'tv' | 'movie',
         category: primarySelection,
         type: secondarySelection,
-        pageLimit: 198,
+        pageLimit: 25,
         pageStart,
       };
     },
@@ -117,7 +120,8 @@ function DoubanPageClient() {
 
       if (data.code === 200) {
         setDoubanData(data.list);
-        setHasMore(data.list.length === 198);
+        // 检查是否已达到最大条数或没有更多数据
+        setHasMore(data.list.length === 25 && data.list.length < MAX_ITEMS);
         setLoading(false);
       } else {
         throw new Error(data.message || '获取数据失败');
@@ -172,12 +176,23 @@ function DoubanPageClient() {
           setIsLoadingMore(true);
 
           const data = await getDoubanCategories(
-            getRequestParams(currentPage * 198)
+            getRequestParams(currentPage * 25)
           );
 
           if (data.code === 200) {
-            setDoubanData((prev) => [...prev, ...data.list]);
-            setHasMore(data.list.length === 198);
+            setDoubanData((prev) => {
+              const newData = [...prev, ...data.list];
+              // 限制最多326条数据
+              const limitedData = newData.slice(0, MAX_ITEMS);
+              return limitedData;
+            });
+            
+            // 检查是否还有更多数据可加载
+            setHasMore((prev) => {
+              const currentTotal = doubanData.length + data.list.length;
+              // 如果已经达到326条或没有返回25条数据，则停止加载
+              return data.list.length === 25 && currentTotal < MAX_ITEMS;
+            });
           } else {
             throw new Error(data.message || '获取数据失败');
           }
@@ -207,7 +222,10 @@ function DoubanPageClient() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
-          setCurrentPage((prev) => prev + 1);
+          // 检查当前数据量是否已达到最大值
+          if (doubanData.length < MAX_ITEMS) {
+            setCurrentPage((prev) => prev + 1);
+          }
         }
       },
       { threshold: 0.1 }
@@ -221,7 +239,7 @@ function DoubanPageClient() {
         observerRef.current.disconnect();
       }
     };
-  }, [hasMore, isLoadingMore, loading]);
+  }, [hasMore, isLoadingMore, loading, doubanData.length]);
 
   // 处理选择器变化
   const handlePrimaryChange = useCallback(
@@ -333,7 +351,11 @@ function DoubanPageClient() {
 
           {/* 没有更多数据提示 */}
           {!hasMore && doubanData.length > 0 && (
-            <div className='text-center text-gray-500 py-8'>已加载全部内容</div>
+            <div className='text-center text-gray-500 py-8'>
+              {doubanData.length >= MAX_ITEMS 
+                ? `已加载全部内容（共 ${doubanData.length} 条）` 
+                : '已加载全部内容'}
+            </div>
           )}
 
           {/* 空状态 */}
