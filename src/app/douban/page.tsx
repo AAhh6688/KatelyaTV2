@@ -92,7 +92,7 @@ function DoubanPageClient() {
           kind: 'tv' as const,
           category: type,
           type: secondarySelection,
-          pageLimit: 25,
+          pageLimit: 200,
           pageStart,
         };
       }
@@ -102,7 +102,7 @@ function DoubanPageClient() {
         kind: type as 'tv' | 'movie',
         category: primarySelection,
         type: secondarySelection,
-        pageLimit: 25,
+        pageLimit: 200,
         pageStart,
       };
     },
